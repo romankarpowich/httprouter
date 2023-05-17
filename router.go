@@ -6,30 +6,30 @@
 //
 // A trivial example is:
 //
-//  package main
+//	package main
 //
-//  import (
-//      "fmt"
-//      "github.com/julienschmidt/httprouter"
-//      "net/http"
-//      "log"
-//  )
+//	import (
+//	    "fmt"
+//	    "github.com/julienschmidt/httprouter"
+//	    "net/http"
+//	    "log"
+//	)
 //
-//  func Index(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-//      fmt.Fprint(w, "Welcome!\n")
-//  }
+//	func Index(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+//	    fmt.Fprint(w, "Welcome!\n")
+//	}
 //
-//  func Hello(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
-//      fmt.Fprintf(w, "hello, %s!\n", ps.ByName("name"))
-//  }
+//	func Hello(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+//	    fmt.Fprintf(w, "hello, %s!\n", ps.ByName("name"))
+//	}
 //
-//  func main() {
-//      router := httprouter.New()
-//      router.GET("/", Index)
-//      router.GET("/hello/:name", Hello)
+//	func main() {
+//	    router := httprouter.New()
+//	    router.GET("/", Index)
+//	    router.GET("/hello/:name", Hello)
 //
-//      log.Fatal(http.ListenAndServe(":8080", router))
-//  }
+//	    log.Fatal(http.ListenAndServe(":8080", router))
+//	}
 //
 // The router matches incoming requests by the request method and the path.
 // If a handle is registered for this path and method, the router delegates the
@@ -39,41 +39,45 @@
 //
 // The registered path, against which the router matches incoming requests, can
 // contain two types of parameters:
-//  Syntax    Type
-//  :name     named parameter
-//  *name     catch-all parameter
+//
+//	Syntax    Type
+//	:name     named parameter
+//	*name     catch-all parameter
 //
 // Named parameters are dynamic path segments. They match anything until the
 // next '/' or the path end:
-//  Path: /blog/:category/:post
 //
-//  Requests:
-//   /blog/go/request-routers            match: category="go", post="request-routers"
-//   /blog/go/request-routers/           no match, but the router would redirect
-//   /blog/go/                           no match
-//   /blog/go/request-routers/comments   no match
+//	Path: /blog/:category/:post
+//
+//	Requests:
+//	 /blog/go/request-routers            match: category="go", post="request-routers"
+//	 /blog/go/request-routers/           no match, but the router would redirect
+//	 /blog/go/                           no match
+//	 /blog/go/request-routers/comments   no match
 //
 // Catch-all parameters match anything until the path end, including the
 // directory index (the '/' before the catch-all). Since they match anything
 // until the end, catch-all parameters must always be the final path element.
-//  Path: /files/*filepath
 //
-//  Requests:
-//   /files/                             match: filepath="/"
-//   /files/LICENSE                      match: filepath="/LICENSE"
-//   /files/templates/article.html       match: filepath="/templates/article.html"
-//   /files                              no match, but the router would redirect
+//	Path: /files/*filepath
+//
+//	Requests:
+//	 /files/                             match: filepath="/"
+//	 /files/LICENSE                      match: filepath="/LICENSE"
+//	 /files/templates/article.html       match: filepath="/templates/article.html"
+//	 /files                              no match, but the router would redirect
 //
 // The value of parameters is saved as a slice of the Param struct, consisting
 // each of a key and a value. The slice is passed to the Handle func as a third
 // parameter.
 // There are two ways to retrieve the value of a parameter:
-//  // by the name of the parameter
-//  user := ps.ByName("user") // defined by :user or *user
 //
-//  // by the index of the parameter. This way you can also get the name (key)
-//  thirdKey   := ps[2].Key   // the name of the 3rd parameter
-//  thirdValue := ps[2].Value // the value of the 3rd parameter
+//	// by the name of the parameter
+//	user := ps.ByName("user") // defined by :user or *user
+//
+//	// by the index of the parameter. This way you can also get the name (key)
+//	thirdKey   := ps[2].Key   // the name of the 3rd parameter
+//	thirdValue := ps[2].Value // the value of the 3rd parameter
 package httprouter
 
 import (
@@ -132,6 +136,8 @@ var MatchedRoutePathParam = "$matchedRoutePath"
 func (ps Params) MatchedRoutePath() string {
 	return ps.ByName(MatchedRoutePathParam)
 }
+
+var mu = sync.RWMutex{}
 
 // Router is a http.Handler which can be used to dispatch requests to different
 // handler functions via configurable routes
@@ -216,6 +222,15 @@ func New() *Router {
 		RedirectFixedPath:      true,
 		HandleMethodNotAllowed: true,
 		HandleOPTIONS:          true,
+	}
+}
+
+// UpdateTrees update trees (map of routes)
+func (r *Router) UpdateTrees(router *Router) {
+	if r != nil {
+		mu.Lock()
+		defer mu.Unlock()
+		r.trees = router.trees
 	}
 }
 
@@ -366,7 +381,8 @@ func (r *Router) HandlerFunc(method, path string, handler http.HandlerFunc) {
 // of the Router's NotFound handler.
 // To use the operating system's file system implementation,
 // use http.Dir:
-//     router.ServeFiles("/src/*filepath", http.Dir("/var/www"))
+//
+//	router.ServeFiles("/src/*filepath", http.Dir("/var/www"))
 func (r *Router) ServeFiles(path string, root http.FileSystem) {
 	if len(path) < 10 || path[len(path)-10:] != "/*filepath" {
 		panic("path must end with /*filepath in path '" + path + "'")
@@ -423,6 +439,7 @@ func (r *Router) allowed(path, reqMethod string) (allow string) {
 			return r.globalAllowed
 		}
 	} else { // specific path
+		mu.RLock()
 		for method := range r.trees {
 			// Skip the requested method - we already tried this one
 			if method == reqMethod || method == http.MethodOptions {
@@ -435,6 +452,7 @@ func (r *Router) allowed(path, reqMethod string) (allow string) {
 				allowed = append(allowed, method)
 			}
 		}
+		mu.RUnlock()
 	}
 
 	if len(allowed) > 0 {
@@ -464,8 +482,10 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 
 	path := req.URL.Path
-
-	if root := r.trees[req.Method]; root != nil {
+	mu.RLock()
+	root := r.trees[req.Method]
+	mu.RUnlock()
+	if root != nil {
 		if handle, ps, tsr := root.getValue(path, r.getParams); handle != nil {
 			if ps != nil {
 				handle(w, req, *ps)
